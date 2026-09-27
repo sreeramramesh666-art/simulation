@@ -100,6 +100,7 @@
             <div class="flex items-center gap-1.5">
                 <button onclick="switchView('full')" id="v-full" class="tab-btn active px-3 py-1.5 rounded font-semibold text-[11px]">OVERVIEW</button>
                 <button onclick="switchView('intake')" id="v-intake" class="tab-btn px-3 py-1.5 rounded font-semibold text-[11px]">STEP 1: INTAKE</button>
+                <button onclick="switchView('lime')" id="v-lime" class="tab-btn px-3 py-1.5 rounded font-semibold text-[11px]">STEP 1B: LIMESTONE FILTER</button>
                 <button onclick="switchView('train')" id="v-train" class="tab-btn px-3 py-1.5 rounded font-semibold text-[11px]">STEP 2: TREATMENT</button>
                 <button onclick="switchView('node')" id="v-node" class="tab-btn px-3 py-1.5 rounded font-semibold text-[11px]">STEP 3: NODE & PIPELINE</button>
                 <button onclick="toggleAutoTour()" id="v-tour" class="tab-btn px-3 py-1.5 rounded font-semibold text-[11px] text-amber-300 border-amber-400/40">AUTO-TOUR</button>
@@ -145,6 +146,25 @@
                     </div>
                 </div>
 
+                <!-- Limestone Pre-Conditioning Filtration -->
+                <div class="border-t border-cyan-500/20 pt-3 space-y-3">
+                    <div class="flex justify-between items-center">
+                        <span class="font-bold tracking-wider text-cyan-300">LIMESTONE BED FILTRATION</span>
+                        <span class="text-[10px] bg-cyan-950 text-cyan-400 px-2 py-0.5 rounded border border-cyan-800">PRE-STAGE</span>
+                    </div>
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <span class="text-slate-400">Bed Saturation (Sacrificial Media Life)</span>
+                            <span id="lbl-lime" class="text-amber-400 font-mono">4% Spent</span>
+                        </div>
+                        <input type="range" id="sl-limeSpent" min="0" max="100" value="4" oninput="runCalculations()">
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 text-[10px] pt-1">
+                        <div>Post-Bed pH: <strong id="val-lime-ph" class="text-cyan-300 font-mono">7.6</strong></div>
+                        <div>Debris Trapped: <strong id="val-lime-turb" class="text-cyan-300 font-mono">20%</strong></div>
+                    </div>
+                </div>
+
                 <!-- Chemical Dosing Engine -->
                 <div class="border-t border-cyan-500/20 pt-3 space-y-3">
                     <span class="font-bold tracking-wider text-cyan-300">REACTIVE DOSING FEEDERS</span>
@@ -176,6 +196,10 @@
 
                     <button onclick="backwashBiochar()" class="w-full py-1.5 rounded font-bold border border-cyan-500/40 bg-cyan-950/40 text-cyan-300 hover:bg-cyan-900/50 transition">
                         TRIGGER BIO-CHAR BACKWASH
+                    </button>
+
+                    <button onclick="replaceLimestoneMedia()" class="w-full py-1.5 rounded font-bold border border-cyan-500/40 bg-cyan-950/40 text-cyan-300 hover:bg-cyan-900/50 transition">
+                        REPLACE LIMESTONE MEDIA
                     </button>
                     
                     <button onclick="toggleNetwork()" id="btn-net" class="w-full py-1.5 rounded font-bold border border-slate-600 bg-slate-900 text-slate-300 hover:bg-slate-800 transition">
@@ -288,6 +312,7 @@
             alumDose: 18.0,         // mg/L
             chlorineDose: 2.2,      // ppm
             clogRatio: 0.08,        // 0 to 1
+            limestoneSpent: 4,      // % - sacrificial media saturation
             leakActive: false,
             offlineMode: false,
             batterySoc: 96.8,       // %
@@ -303,6 +328,8 @@
             flowRate: 24.2,
             aiRiskScore: 0.02,
             efficiency: 100.0,
+            limePh: 7.6,
+            limeTurbRemoved: 20,
             loraSequence: 1042
         };
 
@@ -313,6 +340,7 @@
             state.metalProxy = parseFloat(document.getElementById('sl-metal').value);
             state.alumDose = parseFloat(document.getElementById('sl-alum').value);
             state.chlorineDose = parseFloat(document.getElementById('sl-cl').value);
+            state.limestoneSpent = parseFloat(document.getElementById('sl-limeSpent').value);
 
             // UI Label updates
             document.getElementById('lbl-blend').innerText = `${Math.round(state.gwBlend * 100)}% GW`;
@@ -320,15 +348,27 @@
             document.getElementById('lbl-metal').innerText = `${state.metalProxy.toFixed(1)}%`;
             document.getElementById('lbl-alum').innerText = `${state.alumDose.toFixed(0)} mg/L`;
             document.getElementById('lbl-cl').innerText = `${state.chlorineDose.toFixed(1)} ppm`;
+            document.getElementById('lbl-lime').innerText = `${state.limestoneSpent.toFixed(0)}% Spent`;
+
+            // STEP 1B: Sacrificial Limestone Conditioning Bed (filtration pre-stage)
+            // Runs BEFORE bio-char/coagulation: neutralizes acidity, traps coarse debris,
+            // and precipitates early heavy metals. Efficiency decays as the media saturates.
+            const limeEfficiency = Math.max(0.15, 1 - (state.limestoneSpent / 100) * 0.85);
+            state.limePh = 6.9 + (limeEfficiency * 0.9);
+            state.limeTurbRemoved = 8 + (limeEfficiency * 14);
+            const postLimeTurbidity = Math.max(2, state.rawTurbidity * (1 - (state.limeTurbRemoved / 100)));
+            const postLimeMetal = Math.max(0, state.metalProxy * (1 - (limeEfficiency * 0.25)));
+            document.getElementById('val-lime-ph').innerText = state.limePh.toFixed(1);
+            document.getElementById('val-lime-turb').innerText = `${state.limeTurbRemoved.toFixed(0)}%`;
 
             // Math: Blend dynamics
             // Groundwater has higher TDS but lower turbidity; Surface water has high turbidity, lower TDS
-            state.tdsIn = (state.gwBlend * 750) + ((1 - state.gwBlend) * 280) + (state.metalProxy * 6.5);
+            state.tdsIn = (state.gwBlend * 750) + ((1 - state.gwBlend) * 280) + (postLimeMetal * 6.5);
             
-            // Bio-Char + Alum coagulation interaction
+            // Bio-Char + Alum coagulation interaction (operates on limestone-conditioned water)
             // Coagulant reduces turbidity logarithmically, but adds stoichiometric byproducts if overdosed
             const coagEfficiency = 1 - Math.exp(-0.08 * state.alumDose);
-            state.effectiveTurb = Math.max(0.4, (state.rawTurbidity * (1 - coagEfficiency)) - (1 - state.clogRatio) * 8);
+            state.effectiveTurb = Math.max(0.4, (postLimeTurbidity * (1 - coagEfficiency)) - (1 - state.clogRatio) * 8);
 
             // Progressive Clogging
             state.clogRatio = Math.min(0.95, state.clogRatio + (state.effectiveTurb * 0.00008));
@@ -339,7 +379,7 @@
             state.tdsOut = Math.max(8.0, state.tdsIn * (1 - roRejection));
 
             // Disinfection & ORP Kinetics
-            state.ph = 7.3 - (state.alumDose * 0.015) + (state.chlorineDose * 0.04);
+            state.ph = state.limePh - (state.alumDose * 0.015) + (state.chlorineDose * 0.04);
             state.orp = 180 + (state.chlorineDose * 48) - (state.effectiveTurb * 1.5) - (state.metalProxy * 0.8);
 
             // Hydraulics & Leak dynamics
@@ -463,6 +503,12 @@
             runCalculations();
         }
 
+        function replaceLimestoneMedia() {
+            state.limestoneSpent = 4;
+            document.getElementById('sl-limeSpent').value = 4;
+            runCalculations();
+        }
+
         function toggleNetwork() {
             state.offlineMode = !state.offlineMode;
             const badge = document.getElementById('cloud-badge');
@@ -578,6 +624,21 @@
         sensorBox.position.set(-75, 12, 8);
         scene.add(sensorBox);
 
+        // STEP 1B: Sacrificial Limestone Conditioning Bed
+        // Neutralizes acidity, traps coarse debris, and precipitates early heavy metals
+        // BEFORE the water reaches the bio-char treatment train.
+        const limeMesh = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 14, 32), new THREE.MeshPhysicalMaterial({
+            color: 0xcbb994, metalness: 0.1, roughness: 0.8, transparent: true, opacity: 0.35, wireframe: true
+        }));
+        limeMesh.position.set(-58, 8, 0);
+        scene.add(limeMesh);
+
+        const limeMedia = new THREE.Mesh(new THREE.CylinderGeometry(5.6, 5.6, 9, 16), new THREE.MeshStandardMaterial({
+            color: 0xe8dcc0, wireframe: true
+        }));
+        limeMedia.position.set(-58, 5, 0);
+        scene.add(limeMedia);
+
         // STEP 2: Complete Multi-Stage Treatment Train
         // Modular Bio-Char Pre-Filter
         const bioTank = new THREE.Mesh(new THREE.BoxGeometry(14, 14, 14), techGlass);
@@ -644,7 +705,8 @@
             p.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v2.clone().sub(v1).normalize());
             scene.add(p);
         }
-        createPipe(-75, 14, 0, -42, 14, 0);
+        createPipe(-75, 14, 0, -58, 14, 0);
+        createPipe(-58, 14, 0, -42, 14, 0);
         createPipe(-42, 14, 0, -15, 14, 0);
         createPipe(-15, 14, 0, 1, 14, 0);
         createPipe(1, 14, 0, 22, 14, 0);
@@ -668,6 +730,7 @@
         // Main flow particles follow the connected pipe centerline.
         const flowPath = [
             new THREE.Vector3(-75, 14, 0),
+            new THREE.Vector3(-58, 14, 0),
             new THREE.Vector3(-42, 14, 0),
             new THREE.Vector3(-15, 14, 0),
             new THREE.Vector3(1, 14, 0),
@@ -723,12 +786,13 @@
         const views = {
             full: { pos: new THREE.Vector3(10, 80, 160), target: new THREE.Vector3(5, 0, 10) },
             intake: { pos: new THREE.Vector3(-75, 30, 45), target: new THREE.Vector3(-75, 9, 0) },
+            lime: { pos: new THREE.Vector3(-58, 25, 35), target: new THREE.Vector3(-58, 8, 0) },
             train: { pos: new THREE.Vector3(5, 35, 60), target: new THREE.Vector3(5, 10, 0) },
             node: { pos: new THREE.Vector3(80, 10, 75), target: new THREE.Vector3(80, -12, 25) }
         };
 
         function switchView(viewName) {
-            ['full', 'intake', 'train', 'node'].forEach(v => {
+            ['full', 'intake', 'lime', 'train', 'node'].forEach(v => {
                 document.getElementById('v-' + v).classList.remove('active');
             });
             document.getElementById('v-' + viewName).classList.add('active');
@@ -746,7 +810,7 @@
 
         let tourActive = false;
         let tourTimeout;
-        const tourSequence = ['intake', 'train', 'node', 'full'];
+        const tourSequence = ['intake', 'lime', 'train', 'node', 'full'];
         let tourIndex = 0;
 
         function toggleAutoTour() {
@@ -775,6 +839,10 @@
 
             // Leak particles visibility
             leakParticles.visible = state.leakActive;
+
+            // Limestone media darkens/fouls as the sacrificial bed becomes spent
+            const spentRatio = state.limestoneSpent / 100;
+            limeMedia.material.color.setRGB(0.91 - spentRatio * 0.5, 0.86 - spentRatio * 0.55, 0.75 - spentRatio * 0.55);
         }
 
         // -------------------------
