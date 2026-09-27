@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jharkhand Smart Water Network - Enterprise Digital Twin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+    <style>
+        :root {
+            --neon-cyan: #00f3ff;
+            --neon-green: #00ff66;
+            --neon-amber: #ffb700;
+            --neon-red: #ff0055;
+            --bg-dark: #040814;
+        }
+        body { margin: 0; overflow: hidden; background: var(--bg-dark); color: #e2e8f0; font-family: 'Consolas', 'Courier New', monospace; }
+        #canvas-container { position: absolute; inset: 0; z-index: 1; }
+        #ui-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+        .glass-panel {
+            background: rgba(4, 12, 28, 0.88);
+            border: 1px solid rgba(0, 243, 255, 0.25);
+            box-shadow: 0 0 25px rgba(0, 243, 255, 0.12), inset 0 0 15px rgba(0, 243, 255, 0.05);
+            backdrop-filter: blur(10px);
+            pointer-events: auto;
+        }
+        .glow-cyan { text-shadow: 0 0 10px rgba(0, 243, 255, 0.8); }
+        .glow-green { text-shadow: 0 0 10px rgba(0, 255, 102, 0.8); }
+        .glow-red { text-shadow: 0 0 10px rgba(255, 0, 85, 0.8); }
+        .glow-amber { text-shadow: 0 0 10px rgba(255, 183, 0, 0.8); }
+        
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 4px;
+            background: rgba(0, 243, 255, 0.2);
+            border-radius: 2px;
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--neon-cyan);
+            cursor: pointer;
+            box-shadow: 0 0 8px var(--neon-cyan);
+        }
+        .tab-btn {
+            border: 1px solid rgba(0, 243, 255, 0.3);
+            background: rgba(0, 243, 255, 0.05);
+            transition: all 0.2s;
+        }
+        .tab-btn:hover, .tab-btn.active {
+            background: rgba(0, 243, 255, 0.25);
+            border-color: var(--neon-cyan);
+            color: #fff;
+            box-shadow: 0 0 12px rgba(0, 243, 255, 0.4);
+        }
+        .pulsing-dot {
+            animation: pulse 1.2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 0.3; transform: scale(0.9); }
+            50% { opacity: 1; transform: scale(1.1); }
+            100% { opacity: 0.3; transform: scale(0.9); }
+        }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: rgba(0, 243, 255, 0.3); border-radius: 2px; }
+    </style>
+</head>
+<body class="select-none text-xs">
+
+    <div id="canvas-container"></div>
+
+    <div id="ui-layer" class="flex flex-col justify-between p-3">
+        
+        <!-- Header Strip -->
+        <header class="glass-panel rounded-lg p-3 flex flex-wrap items-center justify-between gap-3 border-cyan-500/40">
+            <div class="flex items-center gap-3">
+                <div class="w-3 h-3 rounded-full bg-cyan-400 pulsing-dot"></div>
+                <div>
+                    <h1 class="text-sm md:text-base font-black tracking-widest text-cyan-300 glow-cyan">
+                        JHARKHAND SMART COMMUNITY WATER NETWORK: 3D DIGITAL TWIN
+                    </h1>
+                    <div class="flex items-center gap-3 text-[10px] text-slate-400">
+                        <span>DEV: <strong class="text-cyan-400">Gokul.s</strong></span>
+                        <span>•</span>
+                        <span>CORE ARCHITECTURE: <span class="text-emerald-400">ESP32 + LoRaWAN + Firebase Cloud Sync</span></span>
+                        <span>•</span>
+                        <span id="header-efficiency" class="text-emerald-300 font-bold">EFFICIENCY: 100%</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- View Navigation -->
+            <div class="flex items-center gap-1.5">
+                <button onclick="switchView('full')" id="v-full" class="tab-btn active px-3 py-1.5 rounded font-semibold text-[11px]">OVERVIEW</button>
+                <button onclick="switchView('intake')" id="v-intake" class="tab-btn px-3 py-1.5 rounded font-semibold text-[11px]">STEP 1: INTAKE</button>
+                <button onclick="switchView('train')" id="v-train" class="tab-btn px-3 py-1.5 rounded font-semibold text-[11px]">STEP 2: TREATMENT</button>
+                <button onclick="switchView('node')" id="v-node" class="tab-btn px-3 py-1.5 rounded font-semibold text-[11px]">STEP 3: NODE & PIPELINE</button>
+                <button onclick="toggleAutoTour()" id="v-tour" class="tab-btn px-3 py-1.5 rounded font-semibold text-[11px] text-amber-300 border-amber-400/40">AUTO-TOUR</button>
+            </div>
+        </header>
+
+        <!-- Main Body Panels -->
+        <div class="flex-1 flex justify-between items-stretch my-3 gap-3 overflow-hidden">
+            
+            <!-- Left: Dynamic Process & Dosage Controls -->
+            <aside class="glass-panel rounded-lg w-80 p-3.5 flex flex-col gap-4 overflow-y-auto">
+                <div>
+                    <div class="flex justify-between items-center pb-2 border-b border-cyan-500/20 mb-3">
+                        <span class="font-bold tracking-wider text-cyan-300">PROCESS CONTROL & DOSING</span>
+                        <span class="text-[10px] bg-cyan-950 text-cyan-400 px-2 py-0.5 rounded border border-cyan-800">SCADA AUTO</span>
+                    </div>
+
+                    <!-- Intake Blend -->
+                    <div class="space-y-3">
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <span class="text-slate-400">Groundwater / Surface Blend</span>
+                                <span id="lbl-blend" class="text-cyan-400 font-mono">50% GW</span>
+                            </div>
+                            <input type="range" id="sl-blend" min="0" max="100" value="50" oninput="runCalculations()">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <span class="text-slate-400">Raw Turbidity Intake</span>
+                                <span id="lbl-turb" class="text-amber-400 font-mono">42.0 NTU</span>
+                            </div>
+                            <input type="range" id="sl-turb" min="5" max="180" value="42" oninput="runCalculations()">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <span class="text-slate-400">Heavy Metal Contaminant Proxy</span>
+                                <span id="lbl-metal" class="text-pink-400 font-mono">5.0%</span>
+                            </div>
+                            <input type="range" id="sl-metal" min="0" max="100" value="5" oninput="runCalculations()">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chemical Dosing Engine -->
+                <div class="border-t border-cyan-500/20 pt-3 space-y-3">
+                    <span class="font-bold tracking-wider text-cyan-300">REACTIVE DOSING FEEDERS</span>
+                    
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <span class="text-slate-400">Alum Coagulant (mg/L)</span>
+                            <span id="lbl-alum" class="text-cyan-400 font-mono">18 mg/L</span>
+                        </div>
+                        <input type="range" id="sl-alum" min="0" max="60" value="18" oninput="runCalculations()">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <span class="text-slate-400">Chlorine / Disinfection (ppm)</span>
+                            <span id="lbl-cl" class="text-emerald-400 font-mono">2.2 ppm</span>
+                        </div>
+                        <input type="range" id="sl-cl" min="0" max="8" step="0.1" value="2.2" oninput="runCalculations()">
+                    </div>
+                </div>
+
+                <!-- Pipeline & Network Stress Injections -->
+                <div class="border-t border-cyan-500/20 pt-3 space-y-2 mt-auto">
+                    <span class="font-bold tracking-wider text-rose-400">FAULT & STRESS TESTING</span>
+                    
+                    <button onclick="toggleLeak()" id="btn-leak" class="w-full py-2 rounded font-bold border border-rose-500/60 bg-rose-950/40 text-rose-300 hover:bg-rose-900/60 transition flex justify-center items-center gap-2">
+                        <span id="leak-icon">⚠️</span> <span id="leak-btn-text">INJECT UNDERGROUND LEAK</span>
+                    </button>
+
+                    <button onclick="backwashBiochar()" class="w-full py-1.5 rounded font-bold border border-cyan-500/40 bg-cyan-950/40 text-cyan-300 hover:bg-cyan-900/50 transition">
+                        TRIGGER BIO-CHAR BACKWASH
+                    </button>
+                    
+                    <button onclick="toggleNetwork()" id="btn-net" class="w-full py-1.5 rounded font-bold border border-slate-600 bg-slate-900 text-slate-300 hover:bg-slate-800 transition">
+                        SIMULATE GSM/LoRa BUFFERING
+                    </button>
+                </div>
+            </aside>
+
+            <!-- Center Overlay: Real-Time Flow & Math Telemetry Banner -->
+            <div class="flex-1 flex flex-col justify-between pointer-events-none px-2">
+                <div class="flex justify-center gap-2">
+                    <div class="glass-panel px-4 py-2 rounded-full flex items-center gap-4 text-[11px] border-cyan-500/30">
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> Bio-Char: <strong id="val-clog" class="text-cyan-300">8% Clog</strong></span>
+                        <span>•</span>
+                        <span class="flex items-center gap-1.5">ΔP Filter: <strong id="val-dp" class="text-cyan-300">0.24 Bar</strong></span>
+                        <span>•</span>
+                        <span class="flex items-center gap-1.5">Flow Rate: <strong id="val-flow" class="text-cyan-300">24.2 L/min</strong></span>
+                        <span>•</span>
+                        <span class="flex items-center gap-1.5">Permeate TDS: <strong id="val-tds-out" class="text-emerald-300">28 ppm</strong></span>
+                    </div>
+                </div>
+
+                <!-- Leak Alert Banner -->
+                <div id="leak-banner" class="hidden glass-panel mx-auto p-3 rounded-lg border-rose-500 bg-rose-950/80 text-rose-200 flex items-center gap-3">
+                    <span class="text-xl">🚨</span>
+                    <div>
+                        <div class="font-black text-rose-300 tracking-wider">UNDERGROUND WATER LEAKAGE DETECTED</div>
+                        <div class="text-[10px] text-rose-400 font-mono">Acoustic Piezo Triggered • Differential ΔP: -1.65 Bar • Pinpointed at Chainage +14.2m</div>
+                    </div>
+                </div>
+
+                <!-- Bottom Telemetry HUD -->
+                <div class="grid grid-cols-4 gap-2 text-center pointer-events-auto">
+                    <div class="glass-panel p-2 rounded">
+                        <div class="text-[10px] text-slate-400">AI RISK SCORE</div>
+                        <div id="hud-risk" class="text-sm font-bold text-emerald-400 glow-green">SAFE (0.02)</div>
+                    </div>
+                    <div class="glass-panel p-2 rounded">
+                        <div class="text-[10px] text-slate-400">ORP / DISINFECTION</div>
+                        <div id="hud-orp" class="text-sm font-bold text-cyan-300">265 mV</div>
+                    </div>
+                    <div class="glass-panel p-2 rounded">
+                        <div class="text-[10px] text-slate-400">LiFePO4 BATTERY (12.2V)</div>
+                        <div id="hud-bat" class="text-sm font-bold text-cyan-300">96.8% (SOLAR ACTIVE)</div>
+                    </div>
+                    <div class="glass-panel p-2 rounded">
+                        <div class="text-[10px] text-slate-400">EFFICIENCY METRIC</div>
+                        <div id="hud-eff" class="text-sm font-bold text-emerald-400 glow-green">99.4% OPTIMAL</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: ESP32 + LoRaWAN Telemetry & Firebase Realtime Cloud Hub -->
+            <aside class="glass-panel rounded-lg w-88 p-3.5 flex flex-col gap-3">
+                <div class="flex justify-between items-center pb-2 border-b border-cyan-500/20">
+                    <span class="font-bold tracking-wider text-cyan-300">IOT MONITORING & CLOUD SYNC</span>
+                    <span id="cloud-badge" class="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-700">FIREBASE LIVE</span>
+                </div>
+
+                <!-- ESP32 Hardware Diagnostics -->
+                <div class="p-2.5 rounded bg-black/40 border border-cyan-900/60 space-y-1.5">
+                    <div class="flex justify-between items-center text-[10px] text-cyan-400 font-bold">
+                        <span>ESP32 VERIFICATION NODE #01</span>
+                        <span class="text-slate-500 font-mono">FW: v3.2.1-PROD</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 text-[10px]">
+                        <div>ADC pH: <strong id="esp-ph" class="text-slate-200 font-mono">7.24</strong></div>
+                        <div>TDS In: <strong id="esp-tds" class="text-slate-200 font-mono">680 ppm</strong></div>
+                        <div>Acoustic Sensor: <strong id="esp-piezo" class="text-emerald-400 font-mono">0.04 V (QUIET)</strong></div>
+                        <div>Line Pressure: <strong id="esp-press" class="text-slate-200 font-mono">4.18 Bar</strong></div>
+                    </div>
+                </div>
+
+                <!-- LoRaWAN Subsystem Frame -->
+                <div class="p-2.5 rounded bg-black/40 border border-cyan-900/60 space-y-1 text-[10px]">
+                    <div class="flex justify-between text-cyan-400 font-bold">
+                        <span>LoRaWAN IN865 TELEMETRY</span>
+                        <span id="lora-status" class="text-emerald-400">TX OK (SF7 / 125kHz)</span>
+                    </div>
+                    <div class="flex justify-between text-slate-400">
+                        <span>RSSI: <strong id="lora-rssi" class="text-slate-200 font-mono">-78 dBm</strong></span>
+                        <span>SNR: <strong id="lora-snr" class="text-slate-200 font-mono">+9.2 dB</strong></span>
+                        <span>Freq: <strong class="text-slate-200 font-mono">865.06 MHz</strong></span>
+                    </div>
+                    <div class="mt-1 pt-1 border-t border-slate-800 text-[9px] font-mono text-cyan-500 break-all">
+                        RAW PAYLOAD: <span id="lora-hex" class="text-slate-300">01 2A 07 48 00 1C 01 A4 60 9F</span>
+                    </div>
+                </div>
+
+                <!-- Virtual Firebase Cloud Console -->
+                <div class="flex-1 flex flex-col p-2.5 rounded bg-[#030712] border border-cyan-900/60 overflow-hidden">
+                    <div class="flex justify-between items-center pb-1 mb-1 border-b border-slate-800 text-[10px]">
+                        <span class="text-amber-400 font-bold">🔥 Firebase Realtime Database</span>
+                        <span class="text-slate-500 font-mono">latency: 14ms</span>
+                    </div>
+                    <pre id="firebase-tree" class="flex-1 text-[9px] text-emerald-400 font-mono overflow-y-auto leading-relaxed"></pre>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <script>
+        // -------------------------------------------------------------
+        // 1. STATE & MATHEMATICAL CALCULATIONS
+        // -------------------------------------------------------------
+        const state = {
+            gwBlend: 0.5,           // 0 = 100% Surface, 1 = 100% Groundwater
+            rawTurbidity: 42.0,      // NTU
+            metalProxy: 5.0,        // %
+            alumDose: 18.0,         // mg/L
+            chlorineDose: 2.2,      // ppm
+            clogRatio: 0.08,        // 0 to 1
+            leakActive: false,
+            offlineMode: false,
+            batterySoc: 96.8,       // %
+            
+            // Computed
+            effectiveTurb: 0,
+            tdsIn: 0,
+            tdsOut: 0,
+            ph: 7.2,
+            orp: 260,
+            deltaP: 0.24,
+            linePressure: 4.18,
+            flowRate: 24.2,
+            aiRiskScore: 0.02,
+            efficiency: 100.0,
+            loraSequence: 1042
+        };
+
+        function runCalculations() {
+            // Read inputs
+            state.gwBlend = parseFloat(document.getElementById('sl-blend').value) / 100;
+            state.rawTurbidity = parseFloat(document.getElementById('sl-turb').value);
+            state.metalProxy = parseFloat(document.getElementById('sl-metal').value);
+            state.alumDose = parseFloat(document.getElementById('sl-alum').value);
+            state.chlorineDose = parseFloat(document.getElementById('sl-cl').value);
+
+            // UI Label updates
+            document.getElementById('lbl-blend').innerText = `${Math.round(state.gwBlend * 100)}% GW`;
+            document.getElementById('lbl-turb').innerText = `${state.rawTurbidity.toFixed(1)} NTU`;
+            document.getElementById('lbl-metal').innerText = `${state.metalProxy.toFixed(1)}%`;
+            document.getElementById('lbl-alum').innerText = `${state.alumDose.toFixed(0)} mg/L`;
+            document.getElementById('lbl-cl').innerText = `${state.chlorineDose.toFixed(1)} ppm`;
+
+            // Math: Blend dynamics
+            // Groundwater has higher TDS but lower turbidity; Surface water has high turbidity, lower TDS
+            state.tdsIn = (state.gwBlend * 750) + ((1 - state.gwBlend) * 280) + (state.metalProxy * 6.5);
+            
+            // Bio-Char + Alum coagulation interaction
+            // Coagulant reduces turbidity logarithmically, but adds stoichiometric byproducts if overdosed
+            const coagEfficiency = 1 - Math.exp(-0.08 * state.alumDose);
+            state.effectiveTurb = Math.max(0.4, (state.rawTurbidity * (1 - coagEfficiency)) - (1 - state.clogRatio) * 8);
+
+            // Progressive Clogging
+            state.clogRatio = Math.min(0.95, state.clogRatio + (state.effectiveTurb * 0.00008));
+            state.deltaP = 0.18 + Math.pow(state.clogRatio * 1.8, 2);
+
+            // RO Rejection: Nominal 97.5%, drops as clog ratio stresses pre-filtration
+            const roRejection = Math.max(0.75, 0.985 - (state.clogRatio * 0.08));
+            state.tdsOut = Math.max(8.0, state.tdsIn * (1 - roRejection));
+
+            // Disinfection & ORP Kinetics
+            state.ph = 7.3 - (state.alumDose * 0.015) + (state.chlorineDose * 0.04);
+            state.orp = 180 + (state.chlorineDose * 48) - (state.effectiveTurb * 1.5) - (state.metalProxy * 0.8);
+
+            // Hydraulics & Leak dynamics
+            if (state.leakActive) {
+                state.linePressure = Math.max(1.2, 4.18 - 1.85);
+                state.flowRate = Math.max(4.0, 24.2 - 9.4);
+                document.getElementById('leak-banner').classList.remove('hidden');
+                document.getElementById('esp-piezo').innerText = '1.82 V (ACOUSTIC SPIKE)';
+                document.getElementById('esp-piezo').className = 'text-rose-400 font-mono font-bold';
+            } else {
+                state.linePressure = Math.max(2.0, 4.18 - (state.deltaP * 0.8));
+                state.flowRate = Math.max(0, 24.2 - (state.deltaP * 6.0));
+                document.getElementById('leak-banner').classList.add('hidden');
+                document.getElementById('esp-piezo').innerText = '0.04 V (QUIET)';
+                document.getElementById('esp-piezo').className = 'text-emerald-400 font-mono';
+            }
+
+            // AI Risk Surrogate Model
+            let metalPenalty = state.metalProxy > 25 ? (state.metalProxy - 25) * 0.02 : 0;
+            let turbPenalty = state.effectiveTurb > 5 ? (state.effectiveTurb - 5) * 0.05 : 0;
+            let orpPenalty = state.orp < 200 ? (200 - state.orp) * 0.004 : 0;
+            state.aiRiskScore = Math.min(1.0, Math.max(0.01, metalPenalty + turbPenalty + orpPenalty));
+
+            // System Overall Working Efficiency calculation
+            const purityScore = Math.min(1.0, Math.max(0, 1 - (state.tdsOut / 120)));
+            const pressureScore = Math.min(1.0, state.linePressure / 4.0);
+            const orpScore = Math.min(1.0, state.orp / 250);
+            const leakDeduction = state.leakActive ? 0.35 : 0;
+            state.efficiency = Math.max(10, Math.min(100, ((purityScore * 0.4 + pressureScore * 0.3 + orpScore * 0.3) - leakDeduction) * 100));
+
+            updateDOM();
+            update3DVisuals();
+        }
+
+        function updateDOM() {
+            document.getElementById('val-clog').innerText = `${Math.round(state.clogRatio * 100)}% Clog`;
+            document.getElementById('val-dp').innerText = `${state.deltaP.toFixed(2)} Bar`;
+            document.getElementById('val-flow').innerText = `${state.flowRate.toFixed(1)} L/min`;
+            document.getElementById('val-tds-out').innerText = `${state.tdsOut.toFixed(0)} ppm`;
+
+            // HUD
+            const riskEl = document.getElementById('hud-risk');
+            if (state.aiRiskScore > 0.4) {
+                riskEl.innerText = `HIGH RISK (${state.aiRiskScore.toFixed(2)})`;
+                riskEl.className = 'text-sm font-bold text-rose-400 glow-red';
+            } else if (state.aiRiskScore > 0.15) {
+                riskEl.innerText = `MODERATE (${state.aiRiskScore.toFixed(2)})`;
+                riskEl.className = 'text-sm font-bold text-amber-400 glow-amber';
+            } else {
+                riskEl.innerText = `SAFE (${state.aiRiskScore.toFixed(2)})`;
+                riskEl.className = 'text-sm font-bold text-emerald-400 glow-green';
+            }
+
+            document.getElementById('hud-orp').innerText = `${Math.round(state.orp)} mV`;
+            document.getElementById('hud-eff').innerText = `${state.efficiency.toFixed(1)}% OPTIMAL`;
+            document.getElementById('header-efficiency').innerText = `EFFICIENCY: ${state.efficiency.toFixed(0)}%`;
+
+            // ESP32 Telemetry
+            document.getElementById('esp-ph').innerText = state.ph.toFixed(2);
+            document.getElementById('esp-tds').innerText = `${Math.round(state.tdsIn)} ppm`;
+            document.getElementById('esp-press').innerText = `${state.linePressure.toFixed(2)} Bar`;
+
+            // Mock LoRaWAN Packet & Firebase Json
+            updateVirtualCloud();
+        }
+
+        function updateVirtualCloud() {
+            state.loraSequence++;
+            const loraHex = [
+                '01', 
+                Math.round(state.ph * 10).toString(16).padStart(2,'0'),
+                Math.round(state.tdsOut).toString(16).padStart(4,'0'),
+                Math.round(state.linePressure * 100).toString(16).padStart(4,'0'),
+                state.leakActive ? 'FF' : '00'
+            ].join(' ').toUpperCase();
+            document.getElementById('lora-hex').innerText = loraHex;
+
+            const firebaseData = {
+                "nodes": {
+                    "JH-WATER-01": {
+                        "ai_diagnostics": {
+                            "risk_index": state.aiRiskScore.toFixed(2),
+                            "status": state.aiRiskScore > 0.4 ? "CONTAMINATED" : "PURIFIED"
+                        },
+                        "pipeline_metrics": {
+                            "pressure_bar": parseFloat(state.linePressure.toFixed(2)),
+                            "flow_lpm": parseFloat(state.flowRate.toFixed(1)),
+                            "leak_alert": state.leakActive
+                        },
+                        "treatment_status": {
+                            "biochar_clog_pct": Math.round(state.clogRatio * 100),
+                            "permeate_tds_ppm": Math.round(state.tdsOut),
+                            "orp_mv": Math.round(state.orp)
+                        },
+                        "power": {
+                            "battery_soc": parseFloat(state.batterySoc.toFixed(1)),
+                            "solar_charging": true
+                        },
+                        "sync_seq": state.loraSequence
+                    }
+                }
+            };
+            document.getElementById('firebase-tree').innerText = JSON.stringify(firebaseData, null, 2);
+        }
+
+        function toggleLeak() {
+            state.leakActive = !state.leakActive;
+            const btn = document.getElementById('btn-leak');
+            if (state.leakActive) {
+                btn.className = "w-full py-2 rounded font-bold border border-rose-400 bg-rose-600 text-white transition flex justify-center items-center gap-2 shadow-[0_0_15px_rgba(255,0,85,0.8)]";
+                document.getElementById('leak-btn-text').innerText = "RESOLVE PIPE RUPTURE";
+            } else {
+                btn.className = "w-full py-2 rounded font-bold border border-rose-500/60 bg-rose-950/40 text-rose-300 hover:bg-rose-900/60 transition flex justify-center items-center gap-2";
+                document.getElementById('leak-btn-text').innerText = "INJECT UNDERGROUND LEAK";
+            }
+            runCalculations();
+        }
+
+        function backwashBiochar() {
+            state.clogRatio = 0.04;
+            runCalculations();
+        }
+
+        function toggleNetwork() {
+            state.offlineMode = !state.offlineMode;
+            const badge = document.getElementById('cloud-badge');
+            const loraStatus = document.getElementById('lora-status');
+            const netBtn = document.getElementById('btn-net');
+
+            if (state.offlineMode) {
+                badge.innerText = "LOCAL SD BUFFERED";
+                badge.className = "text-[10px] bg-amber-950 text-amber-300 px-2 py-0.5 rounded border border-amber-700";
+                loraStatus.innerText = "OFFLINE QUEUED";
+                loraStatus.className = "text-amber-400";
+                netBtn.innerText = "RESTORE CLOUD GATEWAY";
+            } else {
+                badge.innerText = "FIREBASE LIVE";
+                badge.className = "text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-700";
+                loraStatus.innerText = "TX OK (SF7 / 125kHz)";
+                loraStatus.className = "text-emerald-400";
+                netBtn.innerText = "SIMULATE GSM/LoRa BUFFERING";
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 2. THREE.JS 3D SCENE & ARCHITECTURE
+        // -------------------------------------------------------------
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x040814, 0.007);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 + 0.15;
+
+        // Illumination
+        const ambLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambLight);
+
+        const cyanSpot = new THREE.PointLight(0x00f3ff, 1.2, 300);
+        cyanSpot.position.set(0, 50, 60);
+        scene.add(cyanSpot);
+
+        const underLight = new THREE.PointLight(0x00ff66, 0.8, 150);
+        underLight.position.set(50, -20, 20);
+        scene.add(underLight);
+
+        // Ground Plane (Separates Surface and Underground)
+        const groundGeo = new THREE.PlaneGeometry(300, 160, 20, 20);
+        const groundMat = new THREE.MeshStandardMaterial({
+            color: 0x071126,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.25
+        });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = 0;
+        scene.add(ground);
+
+        // Glass & Tech Materials
+        const techGlass = new THREE.MeshPhysicalMaterial({
+            color: 0x003355,
+            metalness: 0.9,
+            roughness: 0.1,
+            transparent: true,
+            opacity: 0.4,
+            wireframe: true,
+            emissive: 0x002244
+        });
+        const pipeMat = new THREE.MeshStandardMaterial({
+            color: 0x223344,
+            metalness: 0.8,
+            roughness: 0.3,
+            transparent: true,
+            opacity: 0.3,
+            depthWrite: false
+        });
+        const waterMat1 = new THREE.MeshStandardMaterial({
+            color: 0x00d9ff,
+            transparent: true,
+            opacity: 0.7,
+            emissive: 0x004477,
+            emissiveIntensity: 0.6
+        });
+        const waterMatTreated = new THREE.MeshStandardMaterial({
+            color: 0x00ff88,
+            transparent: true,
+            opacity: 0.75,
+            emissive: 0x006633,
+            emissiveIntensity: 0.8
+        });
+
+        // -------------------------
+        // BUILD 3D PROCESS STAGES
+        // -------------------------
+        
+        // STEP 1: Raw Water Batch Intake
+        const intakeMesh = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 18, 32), techGlass);
+        intakeMesh.position.set(-75, 9, 0);
+        scene.add(intakeMesh);
+
+        const intakeWater = new THREE.Mesh(new THREE.CylinderGeometry(6.7, 6.7, 17, 32), waterMat1.clone());
+        intakeWater.position.set(-75, 9, 0);
+        scene.add(intakeWater);
+
+        // Automated Pre-treatment Sensor Box (ESP32)
+        const sensorBox = new THREE.Mesh(new THREE.BoxGeometry(3, 4, 2), new THREE.MeshStandardMaterial({color: 0x00f3ff, wireframe: true}));
+        sensorBox.position.set(-75, 12, 8);
+        scene.add(sensorBox);
+
+        // STEP 2: Complete Multi-Stage Treatment Train
+        // Modular Bio-Char Pre-Filter
+        const bioTank = new THREE.Mesh(new THREE.BoxGeometry(14, 14, 14), techGlass);
+        bioTank.position.set(-42, 7, 0);
+        scene.add(bioTank);
+
+        const bioMedia = new THREE.Mesh(new THREE.BoxGeometry(13, 8, 13), new THREE.MeshStandardMaterial({color: 0x111111, wireframe: true}));
+        bioMedia.position.set(-42, 4, 0);
+        scene.add(bioMedia);
+
+        // Advanced Absorption Columns (3 towers)
+        const columnGroup = new THREE.Group();
+        for (let i = 0; i < 3; i++) {
+            const col = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 20, 24), techGlass);
+            col.position.set(-15 + (i * 8), 10, 0);
+            columnGroup.add(col);
+        }
+        scene.add(columnGroup);
+
+        // High-Rejection RO Membrane Vessels
+        const roGroup = new THREE.Group();
+        for (let i = 0; i < 2; i++) {
+            const ro = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 22, 16), new THREE.MeshStandardMaterial({color: 0x334466, wireframe: true}));
+            ro.rotation.x = Math.PI / 2;
+            ro.position.set(22, 8 + (i * 6), 0);
+            roGroup.add(ro);
+        }
+        scene.add(roGroup);
+
+        // Disinfection & Polishing Unit
+        const polishTank = new THREE.Mesh(new THREE.CylinderGeometry(5.5, 5.5, 16, 32), techGlass);
+        polishTank.position.set(45, 8, 0);
+        scene.add(polishTank);
+
+        const polishWater = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.2, 15, 32), waterMatTreated);
+        polishWater.position.set(45, 8, 0);
+        scene.add(polishWater);
+
+        // STEP 3: Underground Node & Distribution Pipeline
+        // Surface Solar Panel
+        const solarPanel = new THREE.Mesh(new THREE.BoxGeometry(14, 0.4, 9), new THREE.MeshStandardMaterial({color: 0x001133, metalness: 1.0, roughness: 0.1}));
+        solarPanel.rotation.x = Math.PI / 8;
+        solarPanel.position.set(80, 2, 25);
+        scene.add(solarPanel);
+
+        // Underground IP67 Telemetry Vault
+        const vault = new THREE.Mesh(new THREE.BoxGeometry(8, 7, 8), new THREE.MeshStandardMaterial({color: 0x1e293b, wireframe: true}));
+        vault.position.set(80, -9, 25);
+        scene.add(vault);
+
+        // Underground Clean Distribution Pipe
+        const distribPipe = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 110, 24), new THREE.MeshStandardMaterial({color: 0x00f3ff, wireframe: true}));
+        distribPipe.rotation.z = Math.PI / 2;
+        distribPipe.position.set(80, -16, 25);
+        scene.add(distribPipe);
+
+        // Connective Piping above ground
+        function createPipe(x1, y1, z1, x2, y2, z2) {
+            const v1 = new THREE.Vector3(x1, y1, z1);
+            const v2 = new THREE.Vector3(x2, y2, z2);
+            const dist = v1.distanceTo(v2);
+            const p = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, dist, 12), pipeMat);
+            p.position.copy(v1.clone().add(v2).multiplyScalar(0.5));
+            p.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v2.clone().sub(v1).normalize());
+            scene.add(p);
+        }
+        createPipe(-75, 14, 0, -42, 14, 0);
+        createPipe(-42, 14, 0, -15, 14, 0);
+        createPipe(-15, 14, 0, 1, 14, 0);
+        createPipe(1, 14, 0, 22, 14, 0);
+        createPipe(22, 14, 0, 22, 11, 0);
+        createPipe(22, 11, 0, 45, 11, 0);
+        createPipe(45, 11, 0, 45, 4, 0);
+        createPipe(45, 4, 0, 80, -16, 25);
+        createPipe(80, -16, 25, 135, -16, 25);
+
+        // Leak Spray Particles (Activated on leak)
+        const leakPCount = 150;
+        const leakPGeo = new THREE.BufferGeometry();
+        const leakPPos = new Float32Array(leakPCount * 3);
+        for (let i = 0; i < leakPCount * 3; i++) leakPPos[i] = 0;
+        leakPGeo.setAttribute('position', new THREE.BufferAttribute(leakPPos, 3));
+        const leakMat = new THREE.PointsMaterial({color: 0xff0055, size: 0.6, transparent: true, blending: THREE.AdditiveBlending});
+        const leakParticles = new THREE.Points(leakPGeo, leakMat);
+        leakParticles.position.set(70, -16, 25);
+        scene.add(leakParticles);
+
+        // Main flow particles follow the connected pipe centerline.
+        const flowPath = [
+            new THREE.Vector3(-75, 14, 0),
+            new THREE.Vector3(-42, 14, 0),
+            new THREE.Vector3(-15, 14, 0),
+            new THREE.Vector3(1, 14, 0),
+            new THREE.Vector3(22, 14, 0),
+            new THREE.Vector3(22, 11, 0),
+            new THREE.Vector3(45, 11, 0),
+            new THREE.Vector3(45, 4, 0),
+            new THREE.Vector3(80, -16, 25),
+            new THREE.Vector3(135, -16, 25)
+        ];
+        const flowSegmentLengths = [];
+        let flowPathLength = 0;
+        for (let i = 0; i < flowPath.length - 1; i++) {
+            const segmentLength = flowPath[i].distanceTo(flowPath[i + 1]);
+            flowSegmentLengths.push(segmentLength);
+            flowPathLength += segmentLength;
+        }
+
+        function getFlowPathPosition(distance, target) {
+            let remaining = ((distance % flowPathLength) + flowPathLength) % flowPathLength;
+            for (let i = 0; i < flowSegmentLengths.length; i++) {
+                const segmentLength = flowSegmentLengths[i];
+                if (remaining <= segmentLength) {
+                    const progress = remaining / segmentLength;
+                    return target.copy(flowPath[i]).lerp(flowPath[i + 1], progress);
+                }
+                remaining -= segmentLength;
+            }
+            return target.copy(flowPath[0]);
+        }
+
+        // Main Flow Particles
+        const flowCount = 400;
+        const flowGeo = new THREE.BufferGeometry();
+        const flowPositions = new Float32Array(flowCount * 3);
+        const flowDistances = new Float32Array(flowCount);
+        const flowPosition = new THREE.Vector3();
+        for (let i = 0; i < flowCount; i++) {
+            flowDistances[i] = (i / flowCount) * flowPathLength;
+            getFlowPathPosition(flowDistances[i], flowPosition);
+            flowPositions[i * 3] = flowPosition.x;
+            flowPositions[i * 3 + 1] = flowPosition.y;
+            flowPositions[i * 3 + 2] = flowPosition.z;
+        }
+        flowGeo.setAttribute('position', new THREE.BufferAttribute(flowPositions, 3));
+        const flowMat = new THREE.PointsMaterial({color: 0x00f3ff, size: 2, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending});
+        const flowParticles = new THREE.Points(flowGeo, flowMat);
+        scene.add(flowParticles);
+
+        // -------------------------
+        // CAMERA VIEWPORTS & TWEEN
+        // -------------------------
+        const views = {
+            full: { pos: new THREE.Vector3(10, 80, 160), target: new THREE.Vector3(5, 0, 10) },
+            intake: { pos: new THREE.Vector3(-75, 30, 45), target: new THREE.Vector3(-75, 9, 0) },
+            train: { pos: new THREE.Vector3(5, 35, 60), target: new THREE.Vector3(5, 10, 0) },
+            node: { pos: new THREE.Vector3(80, 10, 75), target: new THREE.Vector3(80, -12, 25) }
+        };
+
+        function switchView(viewName) {
+            ['full', 'intake', 'train', 'node'].forEach(v => {
+                document.getElementById('v-' + v).classList.remove('active');
+            });
+            document.getElementById('v-' + viewName).classList.add('active');
+
+            new TWEEN.Tween(camera.position)
+                .to(views[viewName].pos, 1400)
+                .easing(TWEEN.Easing.Cubic.InOut)
+                .start();
+
+            new TWEEN.Tween(controls.target)
+                .to(views[viewName].target, 1400)
+                .easing(TWEEN.Easing.Cubic.InOut)
+                .start();
+        }
+
+        let tourActive = false;
+        let tourTimeout;
+        const tourSequence = ['intake', 'train', 'node', 'full'];
+        let tourIndex = 0;
+
+        function toggleAutoTour() {
+            tourActive = !tourActive;
+            const btn = document.getElementById('v-tour');
+            if (tourActive) {
+                btn.classList.add('active');
+                runTour();
+            } else {
+                btn.classList.remove('active');
+                clearTimeout(tourTimeout);
+            }
+        }
+
+        function runTour() {
+            if (!tourActive) return;
+            switchView(tourSequence[tourIndex]);
+            tourIndex = (tourIndex + 1) % tourSequence.length;
+            tourTimeout = setTimeout(runTour, 5000);
+        }
+
+        function update3DVisuals() {
+            // Intake color shifts to muddy/amber when turbidity is elevated
+            const turbRatio = Math.min(1.0, state.rawTurbidity / 120);
+            intakeWater.material.color.setRGB(turbRatio * 0.9, 0.7 - (turbRatio * 0.4), 0.9 - (turbRatio * 0.7));
+
+            // Leak particles visibility
+            leakParticles.visible = state.leakActive;
+        }
+
+        // -------------------------
+        // ANIMATION LOOP
+        // -------------------------
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            TWEEN.update();
+
+            const delta = Math.min(clock.getDelta(), 0.05);
+            const speed = (state.flowRate / 24) * 24 * delta;
+            const positions = flowParticles.geometry.attributes.position.array;
+            for (let i = 0; i < flowCount; i++) {
+                flowDistances[i] = (flowDistances[i] + speed) % flowPathLength;
+                getFlowPathPosition(flowDistances[i], flowPosition);
+                positions[i * 3] = flowPosition.x;
+                positions[i * 3 + 1] = flowPosition.y;
+                positions[i * 3 + 2] = flowPosition.z;
+            }
+            flowParticles.geometry.attributes.position.needsUpdate = true;
+
+            // Leak spray animation
+            if (state.leakActive) {
+                const leakPos = leakParticles.geometry.attributes.position.array;
+                for (let i = 0; i < leakPCount; i++) {
+                    leakPos[i * 3 + 1] += (Math.random() * 0.4);
+                    leakPos[i * 3] += (Math.random() - 0.5) * 0.3;
+                    leakPos[i * 3 + 2] += (Math.random() - 0.5) * 0.3;
+                    if (leakPos[i * 3 + 1] > 10) {
+                        leakPos[i * 3] = 0;
+                        leakPos[i * 3 + 1] = 0;
+                        leakPos[i * 3 + 2] = 0;
+                    }
+                }
+                leakParticles.geometry.attributes.position.needsUpdate = true;
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Initialize state
+        switchView('full');
+        runCalculations();
+        animate();
+    </script>
+</body>
+</html>
