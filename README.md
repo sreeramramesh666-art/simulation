@@ -2,9 +2,11 @@
 
 An interactive digital twin simulation for a smart water treatment network. Explore the treatment stages, adjust filtration and dosing controls, and inspect the network visualization.
 
-## HTML file
+## Run the simulation
 
-[Open the simulation HTML file](./index.html)
+[Launch the live simulation](https://sreeramramesh666-art.github.io/simulation/)
+
+[View the HTML source](./index.html)
 
 ## Run locally
 
